@@ -6,7 +6,6 @@
 import { Codicon } from '../../../../base/common/codicons.js';
 import { URI } from '../../../../base/common/uri.js';
 import { Selection } from '../../../../editor/common/core/selection.js';
-import { EditorContextKeys } from '../../../../editor/common/editorContextKeys.js';
 import { localize2 } from '../../../../nls.js';
 import { Action2, MenuId } from '../../../../platform/actions/common/actions.js';
 import { ContextKeyExpr } from '../../../../platform/contextkey/common/contextkey.js';
@@ -18,6 +17,7 @@ import { MultiDiffEditor } from './multiDiffEditor.js';
 import { MultiDiffEditorInput } from './multiDiffEditorInput.js';
 import { IEditorGroupsService } from '../../../services/editor/common/editorGroupsService.js';
 import { IEditorService } from '../../../services/editor/common/editorService.js';
+import { ActiveEditorContext } from '../../../common/contextkeys.js';
 
 export class GoToFileAction extends Action2 {
 	constructor() {
@@ -25,9 +25,9 @@ export class GoToFileAction extends Action2 {
 			id: 'multiDiffEditor.goToFile',
 			title: localize2('goToFile', 'Open File'),
 			icon: Codicon.goToFile,
-			precondition: EditorContextKeys.inMultiDiffEditor,
+			precondition: ActiveEditorContext.isEqualTo(MultiDiffEditor.ID),
 			menu: {
-				when: EditorContextKeys.inMultiDiffEditor,
+				when: ActiveEditorContext.isEqualTo(MultiDiffEditor.ID),
 				id: MenuId.MultiDiffEditorFileToolbar,
 				order: 22,
 				group: 'navigation',
@@ -72,12 +72,12 @@ export class CollapseAllAction extends Action2 {
 			title: localize2('collapseAllDiffs', 'Collapse All Diffs'),
 			icon: Codicon.collapseAll,
 			precondition: ContextKeyExpr.and(ContextKeyExpr.equals('activeEditor', MultiDiffEditor.ID), ContextKeyExpr.not('multiDiffEditorAllCollapsed')),
-			menu: {
+			menu: [MenuId.EditorTitle, MenuId.CompactWindowEditorTitle].map(id => ({
+				id,
 				when: ContextKeyExpr.and(ContextKeyExpr.equals('activeEditor', MultiDiffEditor.ID), ContextKeyExpr.not('multiDiffEditorAllCollapsed')),
-				id: MenuId.EditorTitle,
 				group: 'navigation',
 				order: 100
-			},
+			})),
 			f1: true,
 		});
 	}
@@ -105,12 +105,12 @@ export class ExpandAllAction extends Action2 {
 			title: localize2('ExpandAllDiffs', 'Expand All Diffs'),
 			icon: Codicon.expandAll,
 			precondition: ContextKeyExpr.and(ContextKeyExpr.equals('activeEditor', MultiDiffEditor.ID), ContextKeyExpr.has('multiDiffEditorAllCollapsed')),
-			menu: {
+			menu: [MenuId.EditorTitle, MenuId.CompactWindowEditorTitle].map(id => ({
+				id,
 				when: ContextKeyExpr.and(ContextKeyExpr.equals('activeEditor', MultiDiffEditor.ID), ContextKeyExpr.has('multiDiffEditorAllCollapsed')),
-				id: MenuId.EditorTitle,
 				group: 'navigation',
 				order: 100
-			},
+			})),
 			f1: true,
 		});
 	}

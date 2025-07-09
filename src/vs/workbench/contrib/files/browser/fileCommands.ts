@@ -234,11 +234,10 @@ async function resourcesToClipboard(resources: URI[], relative: boolean, clipboa
 		const lineDelimiter = isWindows ? '\r\n' : '\n';
 
 		let separator: '/' | '\\' | undefined = undefined;
-		if (relative) {
-			const relativeSeparator = configurationService.getValue('explorer.copyRelativePathSeparator');
-			if (relativeSeparator === '/' || relativeSeparator === '\\') {
-				separator = relativeSeparator;
-			}
+		const copyRelativeOrFullPathSeparatorSection = relative ? 'explorer.copyRelativePathSeparator' : 'explorer.copyPathSeparator';
+		const copyRelativeOrFullPathSeparator: '/' | '\\' | undefined = configurationService.getValue(copyRelativeOrFullPathSeparatorSection);
+		if (copyRelativeOrFullPathSeparator === '/' || copyRelativeOrFullPathSeparator === '\\') {
+			separator = copyRelativeOrFullPathSeparator;
 		}
 
 		const text = resources.map(resource => labelService.getUriLabel(resource, { relative, noPrefix: true, separator })).join(lineDelimiter);
@@ -337,7 +336,9 @@ CommandsRegistry.registerCommand({
 				explorerView.autoReveal = oldAutoReveal;
 			}
 		} else {
-			const openEditorsView = await viewService.openView(OpenEditorsView.ID, false);
+			// Do not reveal the open editors view if it's hidden explicitly
+			// See https://github.com/microsoft/vscode/issues/227378
+			const openEditorsView = viewService.getViewWithId(OpenEditorsView.ID);
 			if (openEditorsView) {
 				openEditorsView.setExpanded(true);
 				openEditorsView.focus();

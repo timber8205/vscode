@@ -8,7 +8,6 @@ import { VSBuffer } from '../../../common/buffer.js';
 import { ClientConnectionEvent, IMessagePassingProtocol, IPCServer } from '../common/ipc.js';
 import { Emitter, Event } from '../../../common/event.js';
 import { assertType } from '../../../common/types.js';
-import { firstOrDefault } from '../../../common/arrays.js';
 
 /**
  * The MessagePort `Protocol` leverages MessagePortMain style IPC communication
@@ -16,15 +15,15 @@ import { firstOrDefault } from '../../../common/arrays.js';
  */
 class Protocol implements IMessagePassingProtocol {
 
-	readonly onMessage = Event.fromNodeEventEmitter<VSBuffer>(this.port, 'message', (e: MessageEvent) => {
-		if (e.data) {
-			return VSBuffer.wrap(e.data);
-		}
-		return VSBuffer.alloc(0);
-	});
+	readonly onMessage;
 
 	constructor(private port: MessagePortMain) {
-
+		this.onMessage = Event.fromNodeEventEmitter<VSBuffer>(this.port, 'message', (e: MessageEvent) => {
+			if (e.data) {
+				return VSBuffer.wrap(e.data);
+			}
+			return VSBuffer.alloc(0);
+		});
 		// we must call start() to ensure messages are flowing
 		port.start();
 	}
@@ -67,7 +66,7 @@ export class Server extends IPCServer {
 				return;
 			}
 
-			const port = firstOrDefault(e.ports);
+			const port = e.ports.at(0);
 			if (port) {
 				onCreateMessageChannel.fire(port);
 			}

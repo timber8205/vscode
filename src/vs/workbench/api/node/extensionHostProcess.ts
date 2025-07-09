@@ -8,16 +8,15 @@ import * as nativeWatchdog from 'native-watchdog';
 import * as net from 'net';
 import { ProcessTimeRunOnceScheduler } from '../../../base/common/async.js';
 import { VSBuffer } from '../../../base/common/buffer.js';
-import { isCancellationError, isSigPipeError, onUnexpectedError } from '../../../base/common/errors.js';
+import { PendingMigrationError, isCancellationError, isSigPipeError, onUnexpectedError, onUnexpectedExternalError } from '../../../base/common/errors.js';
 import { Event } from '../../../base/common/event.js';
 import * as performance from '../../../base/common/performance.js';
 import { IURITransformer } from '../../../base/common/uriIpc.js';
-import { realpath } from '../../../base/node/extpath.js';
 import { Promises } from '../../../base/node/pfs.js';
 import { IMessagePassingProtocol } from '../../../base/parts/ipc/common/ipc.js';
 import { BufferedEmitter, PersistentProtocol, ProtocolConstants } from '../../../base/parts/ipc/common/ipc.net.js';
 import { NodeSocket, WebSocketNodeSocket } from '../../../base/parts/ipc/node/ipc.net.js';
-import type { MessagePortMain } from '../../../base/parts/sandbox/node/electronTypes.js';
+import type { MessagePortMain, MessageEvent as UtilityMessageEvent } from '../../../base/parts/sandbox/node/electronTypes.js';
 import { boolean } from '../../../editor/common/config/editorOptions.js';
 import product from '../../../platform/product/common/product.js';
 import { ExtensionHostMain, IExitFn } from '../common/extensionHostMain.js';
@@ -25,14 +24,16 @@ import { IHostUtils } from '../common/extHostExtensionService.js';
 import { createURITransformer } from './uriTransformer.js';
 import { ExtHostConnectionType, readExtHostConnection } from '../../services/extensions/common/extensionHostEnv.js';
 import { ExtensionHostExitCode, IExtHostReadyMessage, IExtHostReduceGraceTimeMessage, IExtHostSocketMessage, IExtensionHostInitData, MessageType, createMessageOfType, isMessageOfType } from '../../services/extensions/common/extensionHostProtocol.js';
-
 import { IDisposable } from '../../../base/common/lifecycle.js';
 import '../common/extHost.common.services.js';
 import './extHost.node.services.js';
+import { createRequire } from 'node:module';
+const require = createRequire(import.meta.url);
 
 interface ParsedExtHostArgs {
 	transformURIs?: boolean;
 	skipWorkspaceStorageLock?: boolean;
+	supportGlobalNavigator?: boolean; // enable global navigator object in nodejs
 	useHostProxy?: 'true' | 'false'; // use a string, as undefined is also a valid value
 }
 
@@ -50,7 +51,8 @@ interface ParsedExtHostArgs {
 const args = minimist(process.argv.slice(2), {
 	boolean: [
 		'transformURIs',
-		'skipWorkspaceStorageLock'
+		'skipWorkspaceStorageLock',
+		'supportGlobalNavigator',
 	],
 	string: [
 		'useHostProxy' // 'true' | 'false' | undefined
@@ -63,7 +65,7 @@ const args = minimist(process.argv.slice(2), {
 // happening we essentially blocklist this module from getting loaded in any
 // extension by patching the node require() function.
 (function () {
-	const Module = globalThis._VSCODE_NODE_MODULES.module as any;
+	const Module = require('module');
 	const originalLoad = Module._load;
 
 	Module._load = function (request: string) {
@@ -89,7 +91,7 @@ function patchProcess(allowExit: boolean) {
 	} as (code?: number) => never;
 
 	// override Electron's process.crash() method
-	process.crash = function () {
+	(process as any /* bypass layer checker */).crash = function () {
 		const err = new Error('An extension called process.crash() and this was prevented.');
 		console.warn(err.stack);
 	};
@@ -102,9 +104,10 @@ function patchProcess(allowExit: boolean) {
 
 	process.on = <any>function (event: string, listener: (...args: any[]) => void) {
 		if (event === 'uncaughtException') {
-			listener = function () {
+			const actualListener = listener;
+			listener = function (...args: any[]) {
 				try {
-					return listener.call(undefined, arguments);
+					return actualListener.apply(undefined, args);
 				} catch {
 					// DO NOT HANDLE NOR PRINT the error here because this can and will lead to
 					// more errors which will cause error handling to be reentrant and eventually
@@ -117,6 +120,18 @@ function patchProcess(allowExit: boolean) {
 	};
 
 }
+
+// NodeJS since v21 defines navigator as a global object. This will likely surprise many extensions and potentially break them
+// because `navigator` has historically often been used to check if running in a browser (vs running inside NodeJS)
+if (!args.supportGlobalNavigator) {
+	Object.defineProperty(globalThis, 'navigator', {
+		get: () => {
+			onUnexpectedExternalError(new PendingMigrationError('navigator is now a global in nodejs, please see https://aka.ms/vscode-extensions/navigator for additional info on this error.'));
+			return undefined;
+		}
+	});
+}
+
 
 interface IRendererConnection {
 	protocol: IMessagePassingProtocol;
@@ -151,7 +166,7 @@ function _createExtHostProtocol(): Promise<IMessagePassingProtocol> {
 				});
 			};
 
-			process.parentPort.on('message', (e: Electron.MessageEvent) => withPorts(e.ports));
+			(process as unknown as { parentPort: { on: (event: 'message', listener: (messageEvent: UtilityMessageEvent) => void) => void } }).parentPort.on('message', (e: UtilityMessageEvent) => withPorts(e.ports));
 		});
 
 	} else if (extHostConnection.type === ExtHostConnectionType.Socket) {
@@ -327,7 +342,7 @@ function connectToRenderer(protocol: IMessagePassingProtocol): Promise<IRenderer
 				// So also use the native node module to do it from a separate thread
 				let watchdog: typeof nativeWatchdog;
 				try {
-					watchdog = globalThis._VSCODE_NODE_MODULES['native-watchdog'];
+					watchdog = require('native-watchdog');
 					watchdog.start(initData.parentPid);
 				} catch (err) {
 					// no problem...
@@ -404,7 +419,7 @@ async function startExtensionHostProcess(): Promise<void> {
 		public readonly pid = process.pid;
 		exit(code: number) { nativeExit(code); }
 		fsExists(path: string) { return Promises.exists(path); }
-		fsRealpath(path: string) { return realpath(path); }
+		fsRealpath(path: string) { return Promises.realpath(path); }
 	};
 
 	// Attempt to load uri transformer

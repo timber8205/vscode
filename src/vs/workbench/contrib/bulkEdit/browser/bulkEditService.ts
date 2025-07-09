@@ -28,6 +28,8 @@ import { BulkTextEdits } from './bulkTextEdits.js';
 import { IEditorService } from '../../../services/editor/common/editorService.js';
 import { ILifecycleService, ShutdownReason } from '../../../services/lifecycle/common/lifecycle.js';
 import { IWorkingCopyService } from '../../../services/workingCopy/common/workingCopyService.js';
+import { OpaqueEdits, ResourceAttachmentEdit } from './opaqueEdits.js';
+import { TextModelEditReason } from '../../../../editor/common/textModelEditReason.js';
 
 function liftEdits(edits: ResourceEdit[]): ResourceEdit[] {
 	return edits.map(edit => {
@@ -40,6 +42,11 @@ function liftEdits(edits: ResourceEdit[]): ResourceEdit[] {
 		if (ResourceNotebookCellEdit.is(edit)) {
 			return ResourceNotebookCellEdit.lift(edit);
 		}
+
+		if (ResourceAttachmentEdit.is(edit)) {
+			return ResourceAttachmentEdit.lift(edit);
+		}
+
 		throw new Error('Unsupported edit');
 	});
 }
@@ -88,7 +95,7 @@ class BulkEdit {
 		}
 	}
 
-	async perform(): Promise<readonly URI[]> {
+	async perform(reason?: TextModelEditReason): Promise<readonly URI[]> {
 
 		if (this._edits.length === 0) {
 			return [];
@@ -119,9 +126,11 @@ class BulkEdit {
 			if (group[0] instanceof ResourceFileEdit) {
 				resources.push(await this._performFileEdits(<ResourceFileEdit[]>group, this._undoRedoGroup, this._undoRedoSource, this._confirmBeforeUndo, progress));
 			} else if (group[0] instanceof ResourceTextEdit) {
-				resources.push(await this._performTextEdits(<ResourceTextEdit[]>group, this._undoRedoGroup, this._undoRedoSource, progress));
+				resources.push(await this._performTextEdits(<ResourceTextEdit[]>group, this._undoRedoGroup, this._undoRedoSource, progress, reason));
 			} else if (group[0] instanceof ResourceNotebookCellEdit) {
 				resources.push(await this._performCellEdits(<ResourceNotebookCellEdit[]>group, this._undoRedoGroup, this._undoRedoSource, progress));
+			} else if (group[0] instanceof ResourceAttachmentEdit) {
+				resources.push(await this._performOpaqueEdits(<ResourceAttachmentEdit[]>group, this._undoRedoGroup, this._undoRedoSource, progress));
 			} else {
 				console.log('UNKNOWN EDIT');
 			}
@@ -137,15 +146,21 @@ class BulkEdit {
 		return await model.apply();
 	}
 
-	private async _performTextEdits(edits: ResourceTextEdit[], undoRedoGroup: UndoRedoGroup, undoRedoSource: UndoRedoSource | undefined, progress: IProgress<void>): Promise<readonly URI[]> {
+	private async _performTextEdits(edits: ResourceTextEdit[], undoRedoGroup: UndoRedoGroup, undoRedoSource: UndoRedoSource | undefined, progress: IProgress<void>, reason: TextModelEditReason | undefined): Promise<readonly URI[]> {
 		this._logService.debug('_performTextEdits', JSON.stringify(edits));
 		const model = this._instaService.createInstance(BulkTextEdits, this._label || localize('workspaceEdit', "Workspace Edit"), this._code || 'undoredo.workspaceEdit', this._editor, undoRedoGroup, undoRedoSource, progress, this._token, edits);
-		return await model.apply();
+		return await model.apply(reason);
 	}
 
 	private async _performCellEdits(edits: ResourceNotebookCellEdit[], undoRedoGroup: UndoRedoGroup, undoRedoSource: UndoRedoSource | undefined, progress: IProgress<void>): Promise<readonly URI[]> {
 		this._logService.debug('_performCellEdits', JSON.stringify(edits));
 		const model = this._instaService.createInstance(BulkCellEdits, undoRedoGroup, undoRedoSource, progress, this._token, edits);
+		return await model.apply();
+	}
+
+	private async _performOpaqueEdits(edits: ResourceAttachmentEdit[], undoRedoGroup: UndoRedoGroup, undoRedoSource: UndoRedoSource | undefined, progress: IProgress<void>): Promise<readonly URI[]> {
+		this._logService.debug('_performOpaqueEdits', JSON.stringify(edits));
+		const model = this._instaService.createInstance(OpaqueEdits, undoRedoGroup, undoRedoSource, progress, this._token, edits);
 		return await model.apply();
 	}
 }
@@ -242,7 +257,7 @@ export class BulkEditService implements IBulkEditService {
 		let listener: IDisposable | undefined;
 		try {
 			listener = this._lifecycleService.onBeforeShutdown(e => e.veto(this._shouldVeto(label, e.reason), 'veto.blukEditService'));
-			const resources = await bulkEdit.perform();
+			const resources = await bulkEdit.perform(options?.reason);
 
 			// when enabled (option AND setting) loop over all dirty working copies and trigger save
 			// for those that were involved in this bulk edit operation.

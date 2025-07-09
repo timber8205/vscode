@@ -13,7 +13,7 @@ import * as marked from '../../../../base/common/marked/marked.js';
 import { Schemas } from '../../../../base/common/network.js';
 import { Range } from '../../../../editor/common/core/range.js';
 import { createTextBufferFactory } from '../../../../editor/common/model/textModel.js';
-import { assertIsDefined } from '../../../../base/common/types.js';
+import { assertReturnsDefined } from '../../../../base/common/types.js';
 import { IInstantiationService, ServicesAccessor } from '../../../../platform/instantiation/common/instantiation.js';
 
 interface IWalkThroughContentProvider {
@@ -46,20 +46,7 @@ export async function moduleToContent(instantiationService: IInstantiationServic
 
 	const provider = walkThroughContentRegistry.getProvider(query.moduleId);
 	if (!provider) {
-		// ESM-comment-begin
-		// return new Promise<string>((resolve, reject) => {
-		// require([query.moduleId], content => {
-		// try {
-		// resolve(instantiationService.invokeFunction(content.default));
-		// } catch (err) {
-		// reject(err);
-		// }
-		// });
-		// });
-		// ESM-comment-end
-		// ESM-uncomment-begin
 		throw new Error(`Walkthrough: no provider registered for ${query.moduleId}`);
-		// ESM-uncomment-end
 	}
 
 	return instantiationService.invokeFunction(provider);
@@ -113,6 +100,6 @@ export class WalkThroughSnippetContentProvider implements ITextModelContentProvi
 			const markdown = textBuffer.getValueInRange(range, EndOfLinePreference.TextDefined);
 			marked.marked(markdown, { renderer });
 		}
-		return assertIsDefined(codeEditorModel);
+		return assertReturnsDefined(codeEditorModel);
 	}
 }
